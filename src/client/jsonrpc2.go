@@ -2,14 +2,16 @@ package client
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
-	"net/http"
-	"bytes"
-	"strconv"
 
 	"github.com/bbernhard/signal-cli-rest-api/utils"
 	uuid "github.com/gofrs/uuid"
@@ -202,6 +204,40 @@ func postMessageToWebhook(webhookUrl string, data []byte) error {
 	return nil
 }
 
+func shouldSendToWebhook(rawJson string) bool {
+	var msg map[string]interface{}
+	if err := json.Unmarshal([]byte(rawJson), &msg); err != nil {
+		// If we cannot parse it, do NOT block it
+		return true
+	}
+
+	// 1️⃣ Filter by receiving account
+	if onlyAccount := strings.TrimSpace(os.Getenv("WEBHOOK_RECEIVE_ONLY_FROM_NUMBER")); onlyAccount != "" {
+		if account, ok := msg["account"].(string); ok {
+			if account != onlyAccount {
+				log.Debugf("[Webhook] Skipping event for account %s", account)
+				return false
+			}
+		}
+	}
+
+	// 2️⃣ Filter by event type
+	if excluded := os.Getenv("WEBHOOK_FILTER_EVENT_TYPES"); excluded != "" {
+		if params, ok := msg["params"].(map[string]interface{}); ok {
+			if eventType, ok := params["type"].(string); ok {
+				for _, t := range strings.Split(excluded, ",") {
+					if strings.TrimSpace(t) == eventType {
+						log.Debugf("[Webhook] Skipping excluded event type %s", eventType)
+						return false
+					}
+				}
+			}
+		}
+	}
+
+	return true
+}
+
 func (r *JsonRpc2Client) ReceiveData(number string, receiveWebhookUrl string) {
 	connbuf := bufio.NewReader(r.conn)
 	for {
@@ -217,9 +253,12 @@ func (r *JsonRpc2Client) ReceiveData(number string, receiveWebhookUrl string) {
 		log.Debug("json-rpc received data: ", str)
 
 		if receiveWebhookUrl != "" {
-			err = postMessageToWebhook(receiveWebhookUrl, []byte(str))
-			if err != nil {
-				log.Error("Couldn't post data to webhook: ", err)
+			if shouldSendToWebhook(str) {
+				err = postMessageToWebhook(receiveWebhookUrl, []byte(str))
+				if err != nil {
+					log.Error("Couldn't post data to webhook: ", err)
+				}
+
 			}
 		}
 
