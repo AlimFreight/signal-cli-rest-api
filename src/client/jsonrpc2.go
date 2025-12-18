@@ -203,38 +203,39 @@ func postMessageToWebhook(webhookUrl string, data []byte) error {
 	return nil
 }
 
-func shouldSendToWebhook(raw string) bool {
-	filterEvents := utils.GetEnv("WEBHOOK_FILTER_EVENT_TYPES", "")
-	filterAccount := utils.GetEnv("WEBHOOK_RECEIVE_ONLY_FROM_NUMBER", "")
-
+func shouldSendToWebhook(rawJson string) bool {
 	var msg map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
-		return true
+	if err := json.Unmarshal([]byte(rawJson), &msg); err != nil {
+		return false
 	}
 
-	params, ok := msg["params"].(map[string]interface{})
-	if !ok {
-		return true
+	// 1️⃣ Only forward real incoming events
+	method, ok := msg["method"].(string)
+	if !ok || method != "receive" {
+		return false
 	}
 
-	// ---- Account filter ----
-	if filterAccount != "" {
-		if acc, ok := params["account"].(string); ok {
-			if acc != filterAccount {
-				log.Debug("Webhook drop (account mismatch): ", acc)
-				return false
+	// 2️⃣ Filter by receiving account (Signal number)
+	if onlyAccount := strings.TrimSpace(os.Getenv("WEBHOOK_RECEIVE_ONLY_FROM_NUMBER")); onlyAccount != "" {
+		if params, ok := msg["params"].(map[string]interface{}); ok {
+			if account, ok := params["account"].(string); ok {
+				if account != onlyAccount {
+					log.Debugf("[Webhook] Skipping receive event for account %s", account)
+					return false
+				}
 			}
 		}
 	}
 
-	// ---- Event-type filter ----
-	if filterEvents != "" {
-		envelope, ok := params["envelope"].(map[string]interface{})
-		if ok {
-			for _, ev := range strings.Split(filterEvents, ",") {
-				if _, exists := envelope[ev]; exists {
-					log.Debug("Webhook drop (event type): ", ev)
-					return false
+	// 3️⃣ Filter by event type
+	if excluded := os.Getenv("WEBHOOK_FILTER_EVENT_TYPES"); excluded != "" {
+		if params, ok := msg["params"].(map[string]interface{}); ok {
+			if eventType, ok := params["type"].(string); ok {
+				for _, t := range strings.Split(excluded, ",") {
+					if strings.TrimSpace(t) == eventType {
+						log.Debugf("[Webhook] Skipping excluded receive type %s", eventType)
+						return false
+					}
 				}
 			}
 		}
