@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"os"
 
 	"github.com/bbernhard/signal-cli-rest-api/utils"
 	uuid "github.com/gofrs/uuid"
