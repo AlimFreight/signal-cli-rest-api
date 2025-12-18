@@ -210,34 +210,33 @@ func shouldSendToWebhook(rawJson string) bool {
 		return false
 	}
 
-	// 1️⃣ Only forward real incoming events
+	// 1️⃣ Only "receive" events
 	method, ok := msg["method"].(string)
 	if !ok || method != "receive" {
 		return false
 	}
 
-	// 2️⃣ Filter by receiving account (Signal number)
-	if onlyAccount := strings.TrimSpace(os.Getenv("WEBHOOK_RECEIVE_ONLY_FROM_NUMBER")); onlyAccount != "" {
-		if params, ok := msg["params"].(map[string]interface{}); ok {
-			if account, ok := params["account"].(string); ok {
-				if account != onlyAccount {
-					log.Debugf("[Webhook] Skipping receive event for account %s", account)
-					return false
-				}
-			}
-		}
+	params, ok := msg["params"].(map[string]interface{})
+	if !ok {
+		return false
 	}
 
-	// 3️⃣ Filter by event type
-	if excluded := os.Getenv("WEBHOOK_FILTER_EVENT_TYPES"); excluded != "" {
-		if params, ok := msg["params"].(map[string]interface{}); ok {
-			if eventType, ok := params["type"].(string); ok {
-				for _, t := range strings.Split(excluded, ",") {
-					if strings.TrimSpace(t) == eventType {
-						log.Debugf("[Webhook] Skipping excluded receive type %s", eventType)
-						return false
-					}
-				}
+	// 2️⃣ Only real incoming messages
+	if _, ok := params["dataMessage"]; !ok {
+		// This blocks:
+		// - receiptMessage
+		// - typingMessage
+		// - syncMessage
+		// - callMessage
+		return false
+	}
+
+	// 3️⃣ Filter by receiving account
+	if onlyAccount := strings.TrimSpace(os.Getenv("WEBHOOK_RECEIVE_ONLY_FROM_NUMBER")); onlyAccount != "" {
+		if account, ok := params["account"].(string); ok {
+			if account != onlyAccount {
+				log.Debugf("[Webhook] Skipping message for account %s", account)
+				return false
 			}
 		}
 	}
