@@ -204,32 +204,38 @@ func postMessageToWebhook(webhookUrl string, data []byte) error {
 	return nil
 }
 
-func shouldSendToWebhook(rawJson string) bool {
+func shouldSendToWebhook(raw string) bool {
+	filterEvents := utils.GetEnv("WEBHOOK_FILTER_EVENT_TYPES", "")
+	filterAccount := utils.GetEnv("WEBHOOK_RECEIVE_ONLY_FROM_NUMBER", "")
+
 	var msg map[string]interface{}
-	if err := json.Unmarshal([]byte(rawJson), &msg); err != nil {
-		// If we cannot parse it, do NOT block it
+	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		return true
 	}
 
-	// 1️⃣ Filter by receiving account
-	if onlyAccount := strings.TrimSpace(os.Getenv("WEBHOOK_RECEIVE_ONLY_FROM_NUMBER")); onlyAccount != "" {
-		if account, ok := msg["account"].(string); ok {
-			if account != onlyAccount {
-				log.Debugf("[Webhook] Skipping event for account %s", account)
+	params, ok := msg["params"].(map[string]interface{})
+	if !ok {
+		return true
+	}
+
+	// ---- Account filter ----
+	if filterAccount != "" {
+		if acc, ok := params["account"].(string); ok {
+			if acc != filterAccount {
+				log.Debug("Webhook drop (account mismatch): ", acc)
 				return false
 			}
 		}
 	}
 
-	// 2️⃣ Filter by event type
-	if excluded := os.Getenv("WEBHOOK_FILTER_EVENT_TYPES"); excluded != "" {
-		if params, ok := msg["params"].(map[string]interface{}); ok {
-			if eventType, ok := params["type"].(string); ok {
-				for _, t := range strings.Split(excluded, ",") {
-					if strings.TrimSpace(t) == eventType {
-						log.Debugf("[Webhook] Skipping excluded event type %s", eventType)
-						return false
-					}
+	// ---- Event-type filter ----
+	if filterEvents != "" {
+		envelope, ok := params["envelope"].(map[string]interface{})
+		if ok {
+			for _, ev := range strings.Split(filterEvents, ",") {
+				if _, exists := envelope[ev]; exists {
+					log.Debug("Webhook drop (event type): ", ev)
+					return false
 				}
 			}
 		}
@@ -237,6 +243,7 @@ func shouldSendToWebhook(rawJson string) bool {
 
 	return true
 }
+
 
 func (r *JsonRpc2Client) ReceiveData(number string, receiveWebhookUrl string) {
 	connbuf := bufio.NewReader(r.conn)
@@ -252,13 +259,10 @@ func (r *JsonRpc2Client) ReceiveData(number string, receiveWebhookUrl string) {
 		}
 		log.Debug("json-rpc received data: ", str)
 
-		if receiveWebhookUrl != "" {
-			if shouldSendToWebhook(str) {
-				err = postMessageToWebhook(receiveWebhookUrl, []byte(str))
-				if err != nil {
-					log.Error("Couldn't post data to webhook: ", err)
-				}
-
+		if receiveWebhookUrl != "" && shouldSendToWebhook(str) {
+			err = postMessageToWebhook(receiveWebhookUrl, []byte(str))
+			if err != nil {
+				log.Error("Couldn't post data to webhook: ", err)
 			}
 		}
 
