@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
