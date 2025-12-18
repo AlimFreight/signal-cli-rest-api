@@ -210,32 +210,33 @@ func shouldSendToWebhook(rawJson string) bool {
 		return false
 	}
 
-	// 1️⃣ Only "receive" events
+	// 1️⃣ Must be a receive event
 	method, ok := msg["method"].(string)
 	if !ok || method != "receive" {
 		return false
 	}
 
+	// 2️⃣ Params must exist
 	params, ok := msg["params"].(map[string]interface{})
 	if !ok {
 		return false
 	}
 
-	// 2️⃣ Only real incoming messages
-	if _, ok := params["dataMessage"]; !ok {
-		// This blocks:
-		// - receiptMessage
-		// - typingMessage
-		// - syncMessage
-		// - callMessage
+	// 3️⃣ Envelope must exist
+	envelope, ok := params["envelope"].(map[string]interface{})
+	if !ok {
 		return false
 	}
 
-	// 3️⃣ Filter by receiving account
+	// 4️⃣ Must contain a dataMessage (this is the KEY)
+	if _, ok := envelope["dataMessage"]; !ok {
+		return false
+	}
+
+	// 5️⃣ Optional: filter by receiving account
 	if onlyAccount := strings.TrimSpace(os.Getenv("WEBHOOK_RECEIVE_ONLY_FROM_NUMBER")); onlyAccount != "" {
 		if account, ok := params["account"].(string); ok {
 			if account != onlyAccount {
-				log.Debugf("[Webhook] Skipping message for account %s", account)
 				return false
 			}
 		}
